@@ -179,9 +179,17 @@ module Hl
   extend FFI::Library
   ffi_lib 'hlhl'
 
-  attach_variable :dyn, :hlt_dyn, HlType
-  attach_variable :bytes, :hlt_bytes, HlType
+  attach_variable :tvoid, :hlt_void, HlType
   attach_variable :i32, :hlt_i32, HlType
+  attach_variable :i64, :hlt_i64, HlType
+  attach_variable :f64, :hlt_f64, HlType
+  attach_variable :f32, :hlt_f32, HlType
+  attach_variable :dyn, :hlt_dyn, HlType
+  attach_variable :array, :hlt_array, HlType
+  attach_variable :bytes, :hlt_bytes, HlType
+  attach_variable :dynobj, :hlt_dynobj, HlType
+  attach_variable :bool, :hlt_bool, HlType
+  attach_variable :abstract, :hlt_abstract, HlType
 
   attach_function :global_init, :hl_global_init, [ ], :void
   attach_function :global_free, :hl_global_free, [ ], :void
@@ -267,6 +275,26 @@ module HashLink
 
 	class Exception <  RuntimeError
 	end
+	# enable package dot access, with cache
+	class Package < BasicObject
+		def initialize(instance, name=[])
+			@inst = instance
+			@name = name
+			@cache = {}
+		end
+		
+		def method_missing(name, *args)
+			::Kernel.raise "Args must be empty when navigating HashLink packages" unless args.empty?
+			cached = @cache[name]
+			return cached if cached
+			sname = name.to_s
+			@cache[name] = if sname[0] == sname[0].upcase
+				@inst.lookup_class((@name + [sname]).join("."))
+			else
+				::HashLink::Package.new(@inst, @name + [sname])
+			end
+		end
+	end
 	class Instance
 		def initialize(bytecode)
 			Hl.global_init
@@ -301,9 +329,14 @@ module HashLink
 					nil
 				end
 			end.reject(&:nil?).to_h
-			@stringClz = lookup_class("String")
+			@pkgroot = Package.new(self, [])
+			@stringClz = types.String
 			@stringType = @iclasses["String"]
 			@stringAlloc = @stringClz._get_field("__alloc__")
+		end
+
+		def types
+			@pkgroot
 		end
 
 		def lookup_class(name)
@@ -340,11 +373,12 @@ module HashLink
 				ex = ::HashLink::Exception.new("Uncaught HashLink exception: #{hlstr}")
 			# 	uprintf(USTR("Uncaught exception: %s\n"), hl_to_string(ctx.ret));
 			puts "attempting backtrace"
-
+				p HlVarray.new(a).asize
 			p a.get_int(16), a.get_pointer(24)
+			p a.get_pointer(24).read_array_of_uint8(24)
 				ex.set_backtrace(HlVarray.new(a).asize.times.map do |i|
 					puts "check bt-------------- size=#{HlVarray.new(a).asize}x"
-					require 'pry'
+					require 'pry' 
 					#binding.pry
 					p a, FFI::Pointer.new(:pointer, a.address + HlVarray.size), FFI::Pointer.new(:pointer, a.address + HlVarray.size).get_pointer(8*i)
 					p FFI::Pointer.new(:pointer, a.address + HlVarray.size).get_pointer(8*i).read_wstring
@@ -395,6 +429,7 @@ module HashLink
 		def unwrap(dyn, type)
 			dd = HlVdynamic.new(dyn)
 			case type.kind
+			when Hl::HVOID then nil
 			when Hl::HI32 then dd.v.i
 			when Hl::HOBJ
 				if type.details == @stringType.details
@@ -496,6 +531,15 @@ module HashLink
 			@staticType = HlType.new(HlVdynamic.new(HlTypeObj.new(type.details).global_value.read_pointer).t)
 		end
 
+		def new(*args)
+			c = HlClosure.new(@engine.lookup_function("__constructor__", @staticType, static_instance))
+			obj = Hl.alloc_obj(@type)
+			# TODO: check for failures, npe's, etc
+			c.value = obj
+			@engine.call_ruby(c, args)
+			DynRef.new(HlVdynamic.new(obj), @engine)
+		end
+
 # 		def get_field(name, err=true)
 
 		def call(name, *args)
@@ -559,13 +603,19 @@ end
 hx = HashLink::Instance.new(File.read("demo.hl", mode: "rb"))
 puts "instanced"
 
-mc = hx.lookup_class("demo.MyClass")
+mc = hx.types.demo.MyClass
 puts "looked"
 
 r = mc.incByTwo(17)
 
 puts "called!"
 p r
+
+p(r = mc.new("myname", 3))
+p r.count
+p r.count
+p r.count
+p r.count
 
 r = mc.buildit("howdy folkszzzzzzz")
 
@@ -576,7 +626,7 @@ p r.count
 p r.count
 p r.count
 p r.count
-p r.nn
+p r.nn 
 
 hx.dispose
 puts "disposed"
