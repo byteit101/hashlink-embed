@@ -233,6 +233,9 @@ module HashLink
 			when Hl::HARRAY
 				# TODO: gc roots?
 				ArrayRef.new(dd, self)
+			when Hl::HFUN
+				# TODO: gc roots?
+				FunRef.new(dd, self)
 			when Hl::HDYN
 				dt = Hl::Type.new(dd.t)
 				if dt.kind != Hl::HDYN
@@ -479,6 +482,22 @@ module HashLink
 				dd = ::Hl::Vdynamic.new(dyn)
 				@engine.unwrap(dyn, ::Hl::Type.new(dd.t))
 			end
+		end
+	end
+	# for function references. Callable
+	class FunRef < WrappedPtr
+		def initialize(ptr, engine)
+			super(ptr)
+			@fn = ::Hl::Closure.new(@ptr.to_ptr)
+			@engine = engine
+		end
+
+		def call(*rbargs)
+			@engine.call_ruby(@fn, rbargs)
+		end
+
+		def to_proc
+			->(*args){ call(*args) }
 		end
 	end
 end

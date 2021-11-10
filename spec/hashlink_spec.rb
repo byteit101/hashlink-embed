@@ -29,6 +29,8 @@ RSpec.describe "HashLink" do
 		expect(@myclass.returnDyn).not_to be(nil)
 		expect(@myclass.returnEnum).not_to be(nil)
 		expect(@myclass.returnFnc).not_to be(nil)
+		expect(@myclass.returnFnc.call(12)).to eq(false)
+		expect(@myclass.returnFnc.call(-12)).to eq(true)
 		# TODO: bytes, structure, ... ?
 	end
 	it "should support Haxe object interop" do
@@ -76,6 +78,12 @@ RSpec.describe "HashLink" do
 		expect{@myclass.iDontExist}.to raise_error(NameError, "Method doesn't exist iDontExist")
 		expect{@hl.types.rubyspec.MyFields.new(1).field! :iDontExist}.to raise_error(NameError, "Field doesn't exist iDontExist")
 		# TODO: other errors?
+	end
+
+	it "should support advanced interop" do
+		# coerce functions via to_proc coersion
+		expect((-1..6).map(&@myclass.returnFnc)).to eq([true, true, true, true, false, false, false, false])
+		# TODO: more...?
 	end
 
 	it "should support field read" do
