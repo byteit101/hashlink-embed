@@ -1,4 +1,4 @@
 syntax: glob
-dump
+dump/
 hashlink-*/
 *.hl
