@@ -4,7 +4,13 @@ require 'ffi'
 
 require_relative 'lib/hashlink-embed/hashlink'
 
-hx = HashLink::Instance.new(File.read("demo.hl", mode: "rb"))
+hx = HashLink::Instance.new(File.read("spec/spec.hl", mode: "rb"))
+
+
+require 'pry'
+binding.pry
+puts "done!"
+exit 0
 puts "instanced"
 
 mc = hx.types.demo.MyClass

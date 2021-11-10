@@ -1,0 +1,4 @@
+-D dump
+-cp . 
+rubyspec
+-hl spec.hl

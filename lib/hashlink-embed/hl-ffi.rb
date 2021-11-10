@@ -80,6 +80,13 @@ class Vdynamic < FFI::Struct
 		:v, DynamicUnion
 end
 
+class Vvirtual < FFI::Struct
+	layout 	:t, :pointer,  # hl_type *
+	:value, :pointer, #vdynamic *
+	:next, :pointer #:vvirtual *
+end
+
+
 class Module < FFI::Struct
 	layout :code, :pointer, # hl_code *
 		:codesize, :int,
@@ -93,6 +100,14 @@ class Module < FFI::Struct
 		:jit_debug, :pointer, # hl_debug_infos *
 		:jit_ctx, :pointer # jit_ctx *
 		# hl_module_context ctx; # TODO:!
+end
+class TypeVirtual < FFI::Struct
+	layout 	:fields, :pointer, # hl_obj_field *
+	:nfields, :int,
+
+	:dataSize, :int,
+	:indexes, :pointer, # int *
+	:lookup, :pointer # hl_field_lookup *
 end
 
 class TypeObj < FFI::Struct
@@ -185,6 +200,7 @@ class Code < FFI::Struct
   #attach_function :alloc_obj, :hl_alloc_obj, [:pointer], :int
   attach_function :obj_resolve_field, [:pointer, :int], :pointer
   attach_function :obj_lookup, :hl_obj_lookup, [:pointer, :int, :buffer_out], :pointer
+  attach_function :lookup_find, :hl_lookup_find, [:pointer, :int, :int], :pointer
   attach_function :make_dyn, :hl_make_dyn, [:pointer, :pointer], :pointer
   attach_function :write_dyn, :hl_write_dyn, [:pointer, :pointer, :pointer, :bool], :void
   attach_function :dyn_casti, :hl_dyn_casti, [:pointer, :pointer, :pointer], :int

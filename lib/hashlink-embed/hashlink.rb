@@ -103,7 +103,6 @@ module HashLink
 			else
 				# TODO: HL_MAX_ARGS!
 				HashLink.memory_pointer(:pointer, 10) do |cargs|
-					p args
 					cargs.write_array_of_pointer(args)
 					Hl.dyn_call_safe(closure,cargs,args.length,@isExc)
 				end
@@ -183,9 +182,21 @@ module HashLink
 
 		def read_field_unwrapped(ptr, type)
 			case type.kind
+			when Hl::HNULL,Hl::HVOID then nil
 			when Hl::HI32 then ptr.read_int
+			when Hl::HF64 then ptr.read_double
 			when Hl::HBOOL then ptr.read_int8 != 0
 			when Hl::HBYTES then ptr.read_pointer.read_wstring
+			when Hl::HOBJ
+				# TODO: gc roots?
+				dd = Hl::Vdynamic.new(ptr.read_pointer)
+				if Hl::Type.new(dd.t).details == @stringType.details
+					# TODO: more efficient retreival?
+					extract_str(dd)
+				else
+					# TODO: gc roots?
+					DynRef.new(dd, self)
+				end
 			when Hl::HARRAY
 				# TODO: gc roots?
 				ArrayRef.new(ptr.read_pointer, self)
@@ -213,6 +224,12 @@ module HashLink
 					# TODO: gc roots?
 					DynRef.new(dd, self)
 				end
+			when Hl::HENUM
+				# TODO: gc roots?
+				DynRef.new(dd, self)
+			when Hl::HVIRTUAL, Hl::HABSTRACT
+				# TODO: gc roots?
+				DynRef.new(dd, self)
 			when Hl::HARRAY
 				# TODO: gc roots?
 				ArrayRef.new(dd, self)
@@ -263,16 +280,27 @@ module HashLink
 		def lookup_function(name, type, instance, err=true)
 			hash = field_hash(name.to_s)
 			#  TODO: not using obj_resolve_field?
-			lookup = Hl.obj_resolve_field(type.details, hash)
+			lookup = case type.kind
+				when Hl::HOBJ then Hl.obj_resolve_field(type.details, hash)
+				when Hl::HVIRTUAL
+					tv = Hl::TypeVirtual.new(type.details)
+					# TODO: validate nfields is the correct name
+					Hl.lookup_find(tv.lookup, tv.nfields, hash)
+				else "Can't look up type on unknown thing: #{type.kind}"
+			end
 			if lookup.null?
 				if err
-					raise NameError.new("Field doesn't exist #{name}")
+					raise NameError.new("Method doesn't exist #{name}")
 				else
 					return nil
 				end
 			end
+			fl = Hl::FieldLookup.new(lookup)
+			if fl.hashed_name != hash
+				raise "Implementation error on finding #{name}"
+			end
 			
-			return Hl.dyn_getp(instance, Hl::FieldLookup.new(lookup).hashed_name, Hl.dyn)
+			return Hl.dyn_getp(instance, fl.hashed_name, Hl.dyn)
 		end
 
 		def lookup_raw_field(obj, name)
@@ -284,7 +312,7 @@ module HashLink
 
 		def read_field(obj, name)
 			raw, type = lookup_raw_field(obj, name)
-			throw NameError.new("Field doesn't exist #{name}") if type.null?
+			raise NameError.new("Field doesn't exist #{name}") if type.null?
 			read_field_unwrapped(raw, Hl::Type.new(type))
 		end
 
@@ -375,7 +403,12 @@ module HashLink
 		end
 		def class_name
 			return @lazyname if @lazyname 
-			@lazyname = ::Hl.type_name(@ptr.t).read_wstring # TODO: nils?
+			tname = ::Hl.type_name(@ptr.t)
+			if tname.null?
+				@lazyname = "(unavailable)"
+			else
+				@lazyname = tname.read_wstring
+			end
 		end
 
 		def call(name, *args)
@@ -399,18 +432,36 @@ module HashLink
 			"#<HX:#{class_name} address=#{@ptr.pointer.address.to_s(16)}>"
 		end
 
-		def field(name)
+		def field!(name)
 			@engine.read_field(@ptr, name.to_s)
 		end
 		# TODO: extract this method. Not "native"
 		def to_a # convert the array
 			# TODO: check if an ArrayObj more robustly
-			raise "not an array" if class_name != "hl.types.ArrayObj"
-			ary = field(:array)
-			field(:length).times.map do |i|
-				dyn = @engine._read_array(ary.__ptr, i)
-				dd = ::Hl::Vdynamic.new(dyn)
-				@engine.unwrap(dyn, ::Hl::Type.new(dd.t))
+			# ::Kernel.raise "not an array, but a #{class_name}" if class_name != "hl.types.ArrayObj"
+			# ary = field!(:array)
+			# field!(:length).times.map do |i|
+			# 	dyn = @engine._read_array(ary.__ptr, i)
+			# 	dd = ::Hl::Vdynamic.new(dyn)
+			# 	@engine.unwrap(dyn, ::Hl::Type.new(dd.t))
+			# end
+			[].tap do |dest|
+				it = iterator()
+				while it.hasNext
+					dest << it.next
+				end
+			end
+		end
+		# TODO: extract this method. Not "native"
+		def to_h # convert the array
+			# TODO: check if an Map more robustly
+			#::Kernel.raise "not an array, but a #{class_name}" if class_name != "hl.types.ArrayObj"
+			{}.tap do |dest|
+				it = keys()
+				while it.hasNext
+					k = it.next
+					dest[k] = get(k)
+				end
 			end
 		end
 	end
