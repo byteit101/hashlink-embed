@@ -102,8 +102,9 @@ class MyClass {
 		return 1000000000;
 	}
 
-	public static function doitme(x:Array<Int>) {
-		x.iterator().hasNext();
+	// TODO: use lower level to extract maps
+	public static function keepNextInTheCompiledBinary(x:Map<String, String>) {
+		return x.keyValueIterator();
 	}
 }
 

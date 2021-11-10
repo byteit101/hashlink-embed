@@ -42,7 +42,7 @@ RSpec.describe "HashLink" do
 	end
 	it "should support Haxe exceptions" do
 		expect{@myclass.throwException}.to raise_error(HashLink::Exception,  'HashLink exception: Invalid argument "You may be rspec :-)"')
-		# TODO: all!
+		# TODO: all! (including throw "string")
 	end
 	it "should support raw argument value types" do
 		expect(@myclass.acceptRaws(nil, 90_001, true, false, 3.1415)).to eq("natives (null, 90001, true, false, 3.1415)")
