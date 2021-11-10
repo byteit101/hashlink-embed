@@ -61,6 +61,10 @@ class MyClass {
 		return true;
 	}
 
+	public static function returnbool2(input:Bool):Bool {
+		return !input;
+	}
+
 	public static function returnNull():Null<String> {
 		return null;
 	}

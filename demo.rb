@@ -233,6 +233,9 @@ module Hl
   #attach_function :gc_alloc_noptr, :hl_alloc_buffer, [:int], :void
   attach_function :hl_gc_alloc_gen, [:pointer, :int, :int], :pointer
 
+  # despite the name, this function caches
+  attach_function :alloc_dynbool, :hl_alloc_dynbool, [:bool], :pointer
+
   MEM_KIND_NOPTR = 2
   # macro in c
   def self.gc_alloc_noptr(size)
@@ -333,6 +336,9 @@ module HashLink
 			@stringClz = types.String
 			@stringType = @iclasses["String"]
 			@stringAlloc = @stringClz._get_field("__alloc__")
+			# save caches
+			@dtrue = Hl.alloc_dynbool(true)
+			@dfalse = Hl.alloc_dynbool(false)
 		end
 
 		def types
@@ -391,6 +397,12 @@ module HashLink
 			return ret
 		end
 
+		def _read_array(a, index)
+			limit = HlVarray.new(a).asize
+			raise IndexError.new("index #{index} is bigger than varray length #{limit}") if index >= limit
+			a.get_pointer(HlVarray.size + 8*index)
+		end
+
 		def call_ruby(closure, args)
 			# TODO: check types?
 			raise "nil or null" if closure.nil? or closure.null?
@@ -426,11 +438,28 @@ module HashLink
 				HlVdynamic.new(dyn).v.i
 		end
 
+
+		def read_field_unwrapped(ptr, type)
+			case type.kind
+			when Hl::HI32 then ptr.read_int
+			when Hl::HBOOL then ptr.read_int8 != 0
+			when Hl::HBYTES then ptr.read_pointer.read_wstring
+			when Hl::HARRAY
+				# TODO: gc roots?
+				ArrayRef.new(ptr.read_pointer, self)
+			when Hl::HDYN
+				# TODO: read_pointer
+				unwrap(ptr.read_pointer, type)
+			else raise "unknown type to read #{type.kind}"
+			end
+		end
+
 		def unwrap(dyn, type)
 			dd = HlVdynamic.new(dyn)
 			case type.kind
 			when Hl::HVOID then nil
 			when Hl::HI32 then dd.v.i
+			when Hl::HBOOL then dd.v.b
 			when Hl::HOBJ
 				if type.details == @stringType.details
 					# TODO: more efficient retreival?
@@ -438,6 +467,16 @@ module HashLink
 				else
 					# TODO: gc roots?
 					DynRef.new(dd, self)
+				end
+			when Hl::HARRAY
+				# TODO: gc roots?
+				ArrayRef.new(dd, self)
+			when Hl::HDYN
+				dt = HlType.new(dd.t)
+				if dt.kind != Hl::HDYN
+					unwrap(dyn, dt)
+				else
+					raise "double dyn!"
 				end
 			else raise "unknown type to unwrap #{type.kind}"
 			end
@@ -448,6 +487,7 @@ module HashLink
 			return ruby.ptr if ruby.is_a? DynRef
 			case type.kind
 			when Hl::HI32 then make_int32(ruby)
+			when Hl::HBOOL then ruby ? @dtrue : @dfalse
 			when Hl::HOBJ
 				if type.details == @stringType.details
 					if ruby.is_a? String
@@ -500,10 +540,16 @@ module HashLink
 			end
 		end
 
+		def read_field(obj, name)
+			raw, type = lookup_raw_field(obj, name)
+			throw NameError.new("Field doesn't exist #{name}") if type.null?
+			read_field_unwrapped(raw, HlType.new(type))
+		end
+
 		private def extract_str(str)
 			# TODO: cache?
 			field, type = lookup_raw_field(str, "bytes")
-			p field.read_pointer.read_wstring
+			field.read_pointer.read_wstring
 			# TODO: length based
 			#field = lookup_raw_field(str, "length")
 			#p field[0].read_int
@@ -597,6 +643,38 @@ module HashLink
 		def inspect
 			"#<HX:#{class_name} address=#{@ptr.pointer.address.to_s(16)}>"
 		end
+
+		def field(name)
+			@engine.read_field(@ptr, name.to_s)
+		end
+
+		def to_a # convert the array
+			# TODO: check if an ArrayObj more robustly
+			raise "not an array" if class_name != "hl.types.ArrayObj"
+			ary = field(:array)
+			field(:length).times.map do |i|
+				dyn = @engine._read_array(ary.ptr, i)
+				dd = HlVdynamic.new(dyn)
+				@engine.unwrap(dyn, HlType.new(dd.t))
+			end
+		end
+	end
+	# for raw, hl arrays. Haxe arrays are objects of type ArrayObj
+	class ArrayRef
+		attr_reader :ptr
+		def initialize(ptr, engine)
+			@ptr = ptr
+			@va = HlVarray.new(@ptr)
+			@engine = engine
+		end
+
+		def to_a # convert the array
+			@va.asize.times.map do |i|
+				dyn = @engine._read_array(@ptr, i)
+				dd = HlVdynamic.new(dyn)
+				@engine.unwrap(dyn, HlType.new(dd.t))
+			end
+		end
 	end
 end
 
@@ -616,6 +694,9 @@ p r.count
 p r.count
 p r.count
 p r.count
+p mc.returnbool
+p mc.returnbool2
+p mc.returnArray.to_a
 
 r = mc.buildit("howdy folkszzzzzzz")
 
