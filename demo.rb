@@ -494,8 +494,7 @@ module HashLink
 		def wrap(ruby, type)
 			return FFI::Pointer.new(0) if ruby.nil? # TODO: always raw nulls?
 			return ruby if ruby.is_a? FFI::Pointer # TODO:??
-			return ruby.ptr if ruby.is_a? DynRef
-			return ruby.ptr if ruby.is_a? ArrayRef
+			return ruby.__ptr if ruby.is_a? WrappedPtr
 			case type.kind
 			when Hl::HI32 then make_int32(ruby)
 			when Hl::HF64 then make_double(ruby)
@@ -527,12 +526,7 @@ module HashLink
 
 		def lookup_function(name, type, instance, err=true)
 			hash = field_hash(name.to_s)
- # TODO:!!!!!!!???
-	# if(!hl_obj_has_field(instGlbl, hash)){
-	# 	Logfw("object doesn't have constructor field (0x%X)", hash);
-	# 	return NULL;
-	# } #  TODO: not using obj_resolve_field?
-
+			#  TODO: not using obj_resolve_field?
 			lookup = Hl.obj_resolve_field(type.details, hash)
 			if lookup.null?
 				if err
@@ -623,20 +617,33 @@ module HashLink
 		end
 
 	end
-	class DynRef
-		attr_reader :ptr
-		def initialize(ptr, engine)
+	class WrappedPtr < BasicObject
+		def initialize(ptr)
 			@ptr = ptr
+		end
+		def __ptr
+			@ptr
+		end
+		def is_a?(clz)
+			return clz == WrappedPtr # TODO: DynRef? Or haxe types?
+		end
+		def nil?
+			@ptr.null?
+		end
+	end
+	class DynRef < WrappedPtr
+		def initialize(ptr, engine)
+			super(ptr)
 			@lazyname = nil
 			@engine = engine
 		end
 		def class_name
 			return @lazyname if @lazyname 
-			@lazyname = Hl.type_name(@ptr.t).read_wstring # TODO: nils?
+			@lazyname = ::Hl.type_name(@ptr.t).read_wstring # TODO: nils?
 		end
 
 		def call(name, *args)
-			c = HlClosure.new(@engine.lookup_function(name, HlType.new(@ptr.t), @ptr))
+			c = ::HlClosure.new(@engine.lookup_function(name, ::HlType.new(@ptr.t), @ptr))
 			@engine.call_ruby(c, args)
 		end
 
@@ -645,7 +652,7 @@ module HashLink
 			call(name, *args)
 		end
 		def respond_to_missing?(method_name, *args)
-			@engine.lookup_function(name, HlType.new(@ptr.t), @ptr, false) != nil
+			@engine.lookup_function(name, ::HlType.new(@ptr.t), @ptr, false) != nil
 		end
 
 		def to_s
@@ -659,32 +666,31 @@ module HashLink
 		def field(name)
 			@engine.read_field(@ptr, name.to_s)
 		end
-
+		# TODO: extract this method. Not "native"
 		def to_a # convert the array
 			# TODO: check if an ArrayObj more robustly
 			raise "not an array" if class_name != "hl.types.ArrayObj"
 			ary = field(:array)
 			field(:length).times.map do |i|
-				dyn = @engine._read_array(ary.ptr, i)
-				dd = HlVdynamic.new(dyn)
-				@engine.unwrap(dyn, HlType.new(dd.t))
+				dyn = @engine._read_array(ary.__ptr, i)
+				dd = ::HlVdynamic.new(dyn)
+				@engine.unwrap(dyn, ::HlType.new(dd.t))
 			end
 		end
 	end
 	# for raw, hl arrays. Haxe arrays are objects of type ArrayObj
-	class ArrayRef
-		attr_reader :ptr
+	class ArrayRef < WrappedPtr
 		def initialize(ptr, engine)
-			@ptr = ptr
-			@va = HlVarray.new(@ptr)
+			super(ptr)
+			@va = ::HlVarray.new(@ptr)
 			@engine = engine
 		end
 
 		def to_a # convert the array
 			@va.asize.times.map do |i|
 				dyn = @engine._read_array(@ptr, i)
-				dd = HlVdynamic.new(dyn)
-				@engine.unwrap(dyn, HlType.new(dd.t))
+				dd = ::HlVdynamic.new(dyn)
+				@engine.unwrap(dyn, ::HlType.new(dd.t))
 			end
 		end
 	end
