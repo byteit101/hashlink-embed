@@ -427,6 +427,12 @@ module HashLink
 				Hl.make_dyn(value, Hl.i32)
 			end
 		end
+		def make_double(i)
+			memory_pointer(:double, 1) do |value|
+				value.put_double(0, i.to_f)
+				Hl.make_dyn(value, Hl.f64)
+			end
+		end
 		def unwrap_i32(dyn)
 			memory_pointer(:pointer, 1) do |value|
 				value.write_pointer(dyn)
@@ -455,10 +461,13 @@ module HashLink
 		end
 
 		def unwrap(dyn, type)
+			return nil if dyn.null?
 			dd = HlVdynamic.new(dyn)
 			case type.kind
-			when Hl::HVOID then nil
+			when Hl::HVOID, Hl::HNULL then nil
 			when Hl::HI32 then dd.v.i
+			when Hl::HF32 then dd.v.f
+			when Hl::HF64 then dd.v.d
 			when Hl::HBOOL then dd.v.b
 			when Hl::HOBJ
 				if type.details == @stringType.details
@@ -483,15 +492,18 @@ module HashLink
 			
 		end
 		def wrap(ruby, type)
+			return FFI::Pointer.new(0) if ruby.nil? # TODO: always raw nulls?
 			return ruby if ruby.is_a? FFI::Pointer # TODO:??
 			return ruby.ptr if ruby.is_a? DynRef
+			return ruby.ptr if ruby.is_a? ArrayRef
 			case type.kind
 			when Hl::HI32 then make_int32(ruby)
+			when Hl::HF64 then make_double(ruby)
 			when Hl::HBOOL then ruby ? @dtrue : @dfalse
 			when Hl::HOBJ
 				if type.details == @stringType.details
 					if ruby.is_a? String
-					alloc_str(ruby)
+						alloc_str(ruby)
 					else
 						raise "Expecting: string, got #{ruby.class.name}"
 					end
@@ -695,8 +707,12 @@ p r.count
 p r.count
 p r.count
 p mc.returnbool
-p mc.returnbool2
+p mc.returnbool2(true)
 p mc.returnArray.to_a
+p mc.returnFloat
+p mc.returnVoid
+p mc.returnNull
+puts mc.acceptNatives(true, nil, 12.9, 628)
 
 r = mc.buildit("howdy folkszzzzzzz")
 

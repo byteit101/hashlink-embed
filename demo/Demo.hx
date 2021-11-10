@@ -68,4 +68,8 @@ class MyClass {
 	public static function returnNull():Null<String> {
 		return null;
 	}
+
+	public static function acceptNatives(b:Bool, n:Null<String>, f:Float, i:Int32):String {
+		return 'natives ($b, $n, $f, $i)';
+	}
 }
