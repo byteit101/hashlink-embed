@@ -1,4 +1,4 @@
 syntax: glob
 dump/
-hashlink-*/
+hashlink-1*/
 *.hl

@@ -265,7 +265,23 @@ module HashLink
 				else
 					raise "unknown object type to wrap"
 				end
+			when Hl::HDYN then make_dyn(ruby)
 			else raise "unknown type to wrap #{type.kind}"
+			end
+		end
+		
+		def make_dyn(ruby)
+			return FFI::Pointer.new(0) if ruby.nil? # TODO: always raw nulls?
+			# Note: no pointer type here, as we don't know the type!
+			return ruby.__ptr if ruby.is_a? WrappedPtr
+			case ruby
+			when true then @dtrue
+			when false then @dfalse
+			when String then alloc_str(ruby)
+			when Integer then make_int32(ruby)
+			when Float then make_double(ruby)
+			else
+				raise "unsupported type for auto-wrapping #{ruby.class}"
 			end
 		end
 
@@ -278,6 +294,19 @@ module HashLink
 				mbuf.write_pointer(buf)
 				Hl.make_dyn(mbuf, Hl.bytes)
 			end, ustr.bytesize]
+		end
+		# elements must respond to .t and be raw objs/pointers
+		def alloc_rawarray(elements=[], type:nil)
+			if elements.empty?
+				raise "must provide type on empty array creation!" if type.nil?
+			elsif type.nil?
+				type = elements.first.t
+			end
+			ary = Hl.alloc_array(type, elements.size)
+			elements.each_with_index do |x, i|
+				ary.get_pointer(Hl::Varray.size + 8*i).write_pointer(x)
+			end
+			return ary
 		end
 
 		def lookup_function(name, type, instance, err=true)

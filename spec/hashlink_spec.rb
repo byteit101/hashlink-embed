@@ -1,4 +1,4 @@
-require_relative '../lib/hashlink-embed/hashlink'
+require_relative '../lib/hashlink-embed'
 
 RSpec.describe "HashLink" do
 	before :all do
