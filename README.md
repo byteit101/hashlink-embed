@@ -33,6 +33,7 @@ hx.dispose # don't forget to dispose
 
 ## Development
 
+Current interesting bugs: entry point NPE for ruby with all code
 
 ## Contributing
 

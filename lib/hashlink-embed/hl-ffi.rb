@@ -6,6 +6,25 @@ require_relative './ffi-utils'
 module Hl
 	using HlFFI
 
+
+	class ThreadInfo < FFI::Struct
+		layout 	:thread_id, :int,
+		:gc_blocking, :int,
+		:stack_top, :pointer, # void*
+		:stack_cur, :pointer
+		# TODO!?
+		# // exception handling
+		# hl_trap_ctx *trap_current;
+		# hl_trap_ctx *trap_uncaught;
+		# vclosure *exc_handler;
+		# vdynamic *exc_value;
+		# int flags;
+		# int exc_stack_count;
+		# // extra
+		# jmp_buf gc_regs;
+		# void *exc_stack_trace[HL_EXC_MAX_STACK]
+	end
+
 class Type < FFI::Struct
 	layout 	  :kind, :int,
 	:details, :pointer,
@@ -60,7 +79,7 @@ end
 
 class Varray < FFI::Struct
 	layout 	:t, :pointer,  # hl_type *
-		:nregs, :pointer,  # hl_type *
+		:at, :pointer,  # hl_type *
 		:asize, :int, 
 		:__pad, :int #force align on 16 bytes for double
 end
@@ -189,6 +208,8 @@ class Code < FFI::Struct
 
   attach_function :dyn_getp, :hl_dyn_getp, [:pointer, :int, :pointer], :pointer
   attach_function :dyn_geti, :hl_dyn_geti, [:pointer, :int, :pointer], :pointer
+
+  attach_function :alloc_array, :hl_alloc_array, [:pointer, :int], :pointer
   
   attach_function :type_name, :hl_type_name, [:pointer], :pointer
   attach_function :to_utf8, :hl_to_utf8, [:pointer], :string
@@ -199,12 +220,15 @@ class Code < FFI::Struct
   attach_function :alloc_obj, :hl_alloc_obj, [:pointer], :pointer
   #attach_function :alloc_obj, :hl_alloc_obj, [:pointer], :int
   attach_function :obj_resolve_field, [:pointer, :int], :pointer
+  attach_function :obj_fields, :hl_obj_fields, [:pointer], :pointer
   attach_function :obj_lookup, :hl_obj_lookup, [:pointer, :int, :buffer_out], :pointer
   attach_function :lookup_find, :hl_lookup_find, [:pointer, :int, :int], :pointer
   attach_function :make_dyn, :hl_make_dyn, [:pointer, :pointer], :pointer
   attach_function :write_dyn, :hl_write_dyn, [:pointer, :pointer, :pointer, :bool], :void
   attach_function :dyn_casti, :hl_dyn_casti, [:pointer, :pointer, :pointer], :int
 
+  attach_function :get_stack_ptr, [:pointer], :void
+  attach_function :get_thread, :hl_get_thread, [], :pointer
 
   attach_function :exception_stack, :hl_exception_stack, [ ], :pointer
 

@@ -38,8 +38,11 @@ module HashLink
 		def initialize(bytecode)
 			Hl.global_init
 			Hl.sys_init(nil, 0, nil) # TODO: args?  #hl_sys_init((void**)argv,argc,file);
-			@thread_ctx = FFI::MemoryPointer.new(:pointer, 1)
-			Hl.register_thread(@thread_ctx); # void, but an actual thing
+			# the GC stops at the stack pointer. Don't scan any ruby code?
+			@stack_pointer = FFI::MemoryPointer.new(:pointer, 1)
+			Hl.get_stack_ptr(@stack_pointer) # "avoid" this frame?
+			# avoid the ruby&ffi stack?
+			Hl.register_thread(@stack_pointer.read_pointer()) # We must keep this updated
 			
 			# ptr is an out-string if there was an eeror
 			ptr = FFI::MemoryPointer.new(:pointer, 1)
@@ -62,16 +65,20 @@ module HashLink
 			@iclasses = @code.ntypes.times.map do |i|
 				ht = Hl::Type.index_at(@code.types,i)
 				tn = Hl.type_name(ht)
-				unless tn.null?
+				unless tn.null? or ht.kind != Hl::HOBJ # TODO: non-obj types
 					[tn.read_wstring, ht]
 				else
 					nil
 				end
+				#.tap{|x| p x.group_by{|k, v| k}.map{|k, vs| [k, vs.length]}.sort_by{|k, v|v}}
 			end.reject(&:nil?).to_h
 			@pkgroot = Package.new(self, [])
 			@stringClz = types.String
+			raise "no string" unless @stringClz
 			@stringType = @iclasses["String"]
+			raise "no string type" unless @stringType
 			@stringAlloc = @stringClz._get_field("__alloc__")
+			raise "no string alloc" unless @stringAlloc
 			# save caches
 			@dtrue = Hl.alloc_dynbool(true)
 			@dfalse = Hl.alloc_dynbool(false)
@@ -98,6 +105,11 @@ module HashLink
 
 		def call_raw(closure, args)
 			Hl.profile_setup(-1) # TODO: profile setup?
+			# TODO: avoid perf penalty of constant updates?
+			cthread = Hl::ThreadInfo.new(Hl.get_thread)
+			Hl.get_stack_ptr(@stack_pointer) # avoid the ruby&ffi stack
+			cthread.stack_top = @stack_pointer.read_pointer() # We must keep this updated for each call
+
 			ret = if args == []
 				Hl.dyn_call_safe(closure,nil,0,@isExc)
 			else
@@ -113,16 +125,12 @@ module HashLink
 				hlstr = Hl.to_string(ret).read_wstring
 				ex = ::HashLink::Exception.new("Uncaught HashLink exception: #{hlstr}")
 			# 	uprintf(USTR("Uncaught exception: %s\n"), hl_to_string(ctx.ret));
+			require 'pry'
+			binding.pry
 			puts "attempting backtrace"
 				p Hl::Varray.new(a).asize
-			p a.get_int(16), a.get_pointer(24)
-			p a.get_pointer(24).read_array_of_uint8(24)
 				ex.set_backtrace(Hl::Varray.new(a).asize.times.map do |i|
 					puts "check bt-------------- size=#{Hl::Varray.new(a).asize}x"
-					require 'pry' 
-					#binding.pry
-					p a, FFI::Pointer.new(:pointer, a.address + Hl::Varray.size), FFI::Pointer.new(:pointer, a.address + Hl::Varray.size).get_pointer(8*i)
-					p FFI::Pointer.new(:pointer, a.address + Hl::Varray.size).get_pointer(8*i).read_wstring
 				end)
 			# 	for(i=0;i<a->size;i++)
 			#((t*)  (((varray*)(a))+1)  )
@@ -190,7 +198,7 @@ module HashLink
 			when Hl::HOBJ
 				# TODO: gc roots?
 				dd = Hl::Vdynamic.new(ptr.read_pointer)
-				if Hl::Type.new(dd.t).details == @stringType.details
+				if obj_is_str(Hl::Type.new(dd.t))
 					# TODO: more efficient retreival?
 					extract_str(dd)
 				else
@@ -202,8 +210,37 @@ module HashLink
 				ArrayRef.new(ptr.read_pointer, self)
 			when Hl::HDYN
 				# TODO: read_pointer
-				unwrap(ptr.read_pointer, type)
+				unwrap(ptr.read_pointer, type) # TODO: type, or pointer type?
 			else raise "unknown type to read #{type.kind}"
+			end
+		end
+
+		def array_unwrap(ptr, type)
+			#dd = ::Hl::Vdynamic.new(dyn)::Hl::Type.new(dd.t)
+			
+			case type.kind
+			when Hl::HNULL,Hl::HVOID then nil
+			when Hl::HI32 then ptr.read_int
+			when Hl::HF64 then ptr.read_double
+			when Hl::HBOOL then ptr.read_int8 != 0
+			when Hl::HBYTES then ptr.read_wstring
+			when Hl::HOBJ
+				# TODO: gc roots?
+				dd = Hl::Vdynamic.new(ptr)
+				if obj_is_str(Hl::Type.new(dd.t))
+					# TODO: more efficient retreival?
+					extract_str(dd)
+				else
+					# TODO: gc roots?
+					DynRef.new(dd, self)
+				end
+			when Hl::HARRAY
+				# TODO: gc roots?
+				ArrayRef.new(ptr, self)
+			when Hl::HDYN
+				# TODO: read_pointer
+				unwrap(ptr, type) # TODO: type, or pointer type?
+			else raise "unknown type to read array #{type.kind}"
 			end
 		end
 
@@ -217,7 +254,7 @@ module HashLink
 			when Hl::HF64 then dd.v.d
 			when Hl::HBOOL then dd.v.b
 			when Hl::HOBJ
-				if type.details == @stringType.details
+				if obj_is_str(type)
 					# TODO: more efficient retreival?
 					extract_str(dd)
 				else
@@ -247,6 +284,18 @@ module HashLink
 			end
 			
 		end
+		def obj_is_str(type)
+			if @stringType
+			type.details == @stringType.details
+			else # early startup failure	
+				tname = ::Hl.type_name(type)
+				if tname.null?
+					false
+				else
+					tname.read_wstring == "String"
+				end
+			end
+		end
 		def wrap(ruby, type)
 			return FFI::Pointer.new(0) if ruby.nil? # TODO: always raw nulls?
 			return ruby if ruby.is_a? FFI::Pointer # TODO:??
@@ -256,7 +305,7 @@ module HashLink
 			when Hl::HF64 then make_double(ruby)
 			when Hl::HBOOL then ruby ? @dtrue : @dfalse
 			when Hl::HOBJ
-				if type.details == @stringType.details
+				if obj_is_str(type)
 					if ruby.is_a? String
 						alloc_str(ruby)
 					else
@@ -363,11 +412,13 @@ module HashLink
 		end
 
 		private def entrypoint()
-			cl = Hl::Closure.new()
-			cl.t = Hl::Function.index_at(@code.functions, @m.functions_indexes.get_int(@code.entrypoint*4)).type
-			cl.fun = @m.functions_ptrs.get_pointer(@code.entrypoint*8)
-			cl.hasValue = 0
-			call_raw(cl, [])
+			HashLink.memory_pointer(Hl::Closure, 1) do |ptr|
+				cl = Hl::Closure.new(ptr)
+				cl.t = Hl::Function.index_at(@code.functions, @m.functions_indexes.get_int(@code.entrypoint*4)).type
+				cl.fun = @m.functions_ptrs.get_pointer(@code.entrypoint*8)
+				cl.hasValue = 0
+				call_raw(cl, [])
+			end
 		end
 
 		
@@ -376,7 +427,10 @@ module HashLink
 		def initialize(type, engine)
 			@type = type
 			@engine = engine
-			@staticType = Hl::Type.new(Hl::Vdynamic.new(Hl::TypeObj.new(type.details).global_value.read_pointer).t)
+			td = Hl::TypeObj.new(type.details)
+			gv = td.global_value
+			vd = Hl::Vdynamic.new(gv.read_pointer)
+			@staticType = Hl::Type.new(vd.t)
 		end
 
 		def new(*args)
@@ -448,6 +502,11 @@ module HashLink
 			@engine.call_ruby(c, args)
 		end
 
+		def methods
+			# TODO: move?
+			::HashLink::ArrayRef.new(::Hl.obj_fields(@ptr), @engine).to_a
+		end
+
 		# TODO: actively define these
 		def method_missing(name, *args)
 			call(name, *args)
@@ -506,10 +565,10 @@ module HashLink
 		end
 
 		def to_a # convert the array
+			at = ::Hl::Type.new(@va.at)
 			@va.asize.times.map do |i|
 				dyn = @engine._read_array(@ptr, i)
-				dd = ::Hl::Vdynamic.new(dyn)
-				@engine.unwrap(dyn, ::Hl::Type.new(dd.t))
+				@engine.array_unwrap(dyn, at)
 			end
 		end
 	end
