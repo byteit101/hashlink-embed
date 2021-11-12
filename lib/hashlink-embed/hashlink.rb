@@ -448,6 +448,10 @@ module HashLink
 			c = Hl::Closure.new(@engine.lookup_function(name, @staticType, static_instance))
 			@engine.call_ruby(c, args)
 		end
+		def methods
+			# TODO: move?
+			::HashLink::ArrayRef.new(::Hl.obj_fields(static_instance), @engine).to_a
+		end
 
 		def _get_field(name)
 			@engine.lookup_function(name, @staticType, static_instance)
