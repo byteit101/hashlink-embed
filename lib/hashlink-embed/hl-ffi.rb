@@ -227,6 +227,9 @@ class Code < FFI::Struct
   attach_function :write_dyn, :hl_write_dyn, [:pointer, :pointer, :pointer, :bool], :void
   attach_function :dyn_casti, :hl_dyn_casti, [:pointer, :pointer, :pointer], :int
 
+  attach_function :add_root, :hl_add_rootrb, [:pointer], :void
+  attach_function :remove_root, :hl_remove_rootrb, [:pointer], :void
+
   attach_function :get_stack_ptr, [:pointer], :void
   attach_function :get_thread, :hl_get_thread, [], :pointer
 

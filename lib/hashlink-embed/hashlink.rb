@@ -1,5 +1,6 @@
 require_relative './ffi-utils'
 require_relative './hl-ffi'
+require_relative './gc-interop'
 
 module HashLink
 	using HlFFI
@@ -35,6 +36,7 @@ module HashLink
 		end
 	end
 	class Instance
+		attr_reader :gc
 		def initialize(bytecode)
 			Hl.global_init
 			Hl.sys_init(nil, 0, nil) # TODO: args?  #hl_sys_init((void**)argv,argc,file);
@@ -60,6 +62,7 @@ module HashLink
 			Hl.code_free(@code) #module "owns" the code
 
 			@isExc = FFI::MemoryPointer.new(:int, 1)
+			@gc = GcInterop.new(self) # TODO: pin all arguments too!
 
 			entrypoint()
 			@iclasses = @code.ntypes.times.map do |i|
@@ -80,7 +83,7 @@ module HashLink
 			@stringAlloc = @stringClz._get_field("__alloc__")
 			raise "no string alloc" unless @stringAlloc
 			# save caches
-			@dtrue = Hl.alloc_dynbool(true)
+			@dtrue = Hl.alloc_dynbool(true) # note: not true alloc, no gc
 			@dfalse = Hl.alloc_dynbool(false)
 		end
 
@@ -145,6 +148,11 @@ module HashLink
 			raise IndexError.new("index #{index} is bigger than varray length #{limit}") if index >= limit
 			a.get_pointer(Hl::Varray.size + 8*index)
 		end
+		def _write_array(a, index)
+			limit = Hl::Varray.new(a).asize
+			raise IndexError.new("index #{index} is bigger than varray length #{limit}") if index >= limit
+			a + Hl::Varray.size + 8*index
+		end
 
 		def call_ruby(closure, args)
 			# TODO: check types?
@@ -156,7 +164,7 @@ module HashLink
 			converted = args.zip(ptrs).map.each_with_index do |(arg, atype), i|
 				wrap(arg, atype)
 			end
-			return unwrap(call_raw(closure, converted), Hl::Type.new(type.ret))
+			return unwrap(call_raw(closure, converted), Hl::Type.new(type.ret), pin: true)
 		end
 
 		def field_hash(name)
@@ -188,7 +196,7 @@ module HashLink
 		end
 
 
-		def read_field_unwrapped(ptr, type)
+		def read_field_unwrapped(ptr, type, pin: false)
 			case type.kind
 			when Hl::HNULL,Hl::HVOID then nil
 			when Hl::HI32 then ptr.read_int
@@ -203,19 +211,19 @@ module HashLink
 					extract_str(dd)
 				else
 					# TODO: gc roots?
-					DynRef.new(dd, self)
+					DynRef.new(dd, self, pin: pin)
 				end
 			when Hl::HARRAY
 				# TODO: gc roots?
-				ArrayRef.new(ptr.read_pointer, self)
+				ArrayRef.new(ptr.read_pointer, self, pin: pin)
 			when Hl::HDYN
 				# TODO: read_pointer
-				unwrap(ptr.read_pointer, type) # TODO: type, or pointer type?
+				unwrap(ptr.read_pointer, type, pin: pin) # TODO: type, or pointer type?
 			else raise "unknown type to read #{type.kind}"
 			end
 		end
 
-		def array_unwrap(ptr, type)
+		def array_unwrap(ptr, type, pin: false)
 			#dd = ::Hl::Vdynamic.new(dyn)::Hl::Type.new(dd.t)
 			
 			case type.kind
@@ -232,19 +240,19 @@ module HashLink
 					extract_str(dd)
 				else
 					# TODO: gc roots?
-					DynRef.new(dd, self)
+					DynRef.new(dd, self, pin: pin)
 				end
 			when Hl::HARRAY
 				# TODO: gc roots?
-				ArrayRef.new(ptr, self)
+				ArrayRef.new(ptr, self, pin: pin)
 			when Hl::HDYN
 				# TODO: read_pointer
-				unwrap(ptr, type) # TODO: type, or pointer type?
+				unwrap(ptr, type, pin: pin) # TODO: type, or pointer type?
 			else raise "unknown type to read array #{type.kind}"
 			end
 		end
 
-		def unwrap(dyn, type)
+		def unwrap(dyn, type, pin: false)
 			return nil if dyn.null?
 			dd = Hl::Vdynamic.new(dyn)
 			case type.kind
@@ -259,24 +267,24 @@ module HashLink
 					extract_str(dd)
 				else
 					# TODO: gc roots?
-					DynRef.new(dd, self)
+					DynRef.new(dd, self, pin: pin)
 				end
 			when Hl::HENUM
 				# TODO: gc roots?
-				DynRef.new(dd, self)
+				DynRef.new(dd, self, pin: pin)
 			when Hl::HVIRTUAL, Hl::HABSTRACT
 				# TODO: gc roots?
-				DynRef.new(dd, self)
+				DynRef.new(dd, self, pin: pin)
 			when Hl::HARRAY
 				# TODO: gc roots?
-				ArrayRef.new(dd, self)
+				ArrayRef.new(dd, self, pin: pin)
 			when Hl::HFUN
 				# TODO: gc roots?
-				FunRef.new(dd, self)
+				FunRef.new(dd, self, pin: pin)
 			when Hl::HDYN
 				dt = Hl::Type.new(dd.t)
 				if dt.kind != Hl::HDYN
-					unwrap(dyn, dt)
+					unwrap(dyn, dt, pin: pin)
 				else
 					raise "double dyn!"
 				end
@@ -296,6 +304,7 @@ module HashLink
 				end
 			end
 		end
+		# TODO: gc?
 		def wrap(ruby, type)
 			return FFI::Pointer.new(0) if ruby.nil? # TODO: always raw nulls?
 			return ruby if ruby.is_a? FFI::Pointer # TODO:??
@@ -394,7 +403,7 @@ module HashLink
 		def read_field(obj, name)
 			raw, type = lookup_raw_field(obj, name)
 			raise NameError.new("Field doesn't exist #{name}") if type.null?
-			read_field_unwrapped(raw, Hl::Type.new(type))
+			read_field_unwrapped(raw, Hl::Type.new(type), pin: true)
 		end
 
 		private def extract_str(str)
@@ -406,7 +415,7 @@ module HashLink
 			#p field[0].read_int
 		end
 
-		private def alloc_str(str)
+		def alloc_str(str)
 			dyn, len = make_unicodebytes(str)
 			call_raw(@stringAlloc, [dyn, make_int32(str.length)])
 		end
@@ -448,6 +457,9 @@ module HashLink
 			c = Hl::Closure.new(@engine.lookup_function(name, @staticType, static_instance))
 			@engine.call_ruby(c, args)
 		end
+		def _method(name) # TODO: expose this way?
+			Hl::Closure.new(@engine.lookup_function(name, @staticType, static_instance))
+		end
 		def methods
 			# TODO: move?
 			::HashLink::ArrayRef.new(::Hl.obj_fields(static_instance), @engine).to_a
@@ -471,9 +483,12 @@ module HashLink
 		end
 
 	end
+	#class PinnedPtr < ffi # TODO: unpin!
 	class WrappedPtr < BasicObject
-		def initialize(ptr)
+		def initialize(ptr, gc, pin:)
 			@ptr = ptr
+			::Kernel.puts "not pinned! #{self.inspect}" unless pin
+			@pin = gc.pin(ptr.to_ptr, self.inspect) if pin
 		end
 		def __ptr
 			@ptr
@@ -486,10 +501,10 @@ module HashLink
 		end
 	end
 	class DynRef < WrappedPtr
-		def initialize(ptr, engine)
-			super(ptr)
+		def initialize(ptr, engine, pin:)
 			@lazyname = nil
 			@engine = engine
+			super(ptr, engine.gc, pin: pin)
 		end
 		def class_name
 			return @lazyname if @lazyname 
@@ -504,6 +519,9 @@ module HashLink
 		def call(name, *args)
 			c = ::Hl::Closure.new(@engine.lookup_function(name, ::Hl::Type.new(@ptr.t), @ptr))
 			@engine.call_ruby(c, args)
+		end
+		def _method(name) # TODO: wrap in FunRef?
+			::Hl::Closure.new(@engine.lookup_function(name, ::Hl::Type.new(@ptr.t), @ptr))
 		end
 
 		def methods
@@ -562,8 +580,8 @@ module HashLink
 	end
 	# for raw, hl arrays. Haxe arrays are objects of type ArrayObj
 	class ArrayRef < WrappedPtr
-		def initialize(ptr, engine)
-			super(ptr)
+		def initialize(ptr, engine, pin:)
+			super(ptr, engine.gc, pin: pin)
 			@va = ::Hl::Varray.new(@ptr)
 			@engine = engine
 		end
@@ -578,8 +596,8 @@ module HashLink
 	end
 	# for function references. Callable
 	class FunRef < WrappedPtr
-		def initialize(ptr, engine)
-			super(ptr)
+		def initialize(ptr, engine, pin:)
+			super(ptr, engine.gc, pin: pin)
 			@fn = ::Hl::Closure.new(@ptr.to_ptr)
 			@engine = engine
 		end
