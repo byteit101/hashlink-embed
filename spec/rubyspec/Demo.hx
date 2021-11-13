@@ -92,7 +92,7 @@ class MyClass {
 	}
 
 	public static function acceptObjs(str:String, a:Array<String>, dyn:Dynamic):String {
-		return 'obj1 ($str, ${a.length}, ${dyn})';
+		return 'obj1 ($str, ${a.length}, ${a.join(":")}, ${dyn})';
 	}
 
 	/////////////////////////////////////////

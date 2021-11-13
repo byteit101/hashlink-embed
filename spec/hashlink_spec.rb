@@ -41,7 +41,8 @@ RSpec.describe "HashLink" do
 		# TODO: bytes, structure, ... ?
 	end
 	it "should support Haxe exceptions" do
-		expect{@myclass.throwException}.to raise_error(HashLink::Exception,  'HashLink exception: Invalid argument "You may be rspec :-)"')
+		expect{@myclass.throwException}.to raise_error(HashLink::Exception,  'Uncaught HashLink exception: Invalid argument "You may be rspec :-)" in rubyspec.MyClass.doThrow at ./rubyspec/Demo.hx:87')
+		# TODO: check backtrace
 		# TODO: all! (including throw "string")
 	end
 	it "should support raw argument value types" do
@@ -50,7 +51,7 @@ RSpec.describe "HashLink" do
 	end
 	# TODO: unicode tests
 	it "should support Haxe argument value types" do
-		expect(@myclass.acceptObjs("A String", @myclass.returnArray, @myclass.returnDyn)).to eq("Got 'A String'")
+		expect(@myclass.acceptObjs("A String", @myclass.returnArray, @myclass.returnDyn)).to eq("obj1 (A String, 3, first:second:third, 12.34)")
 		expect(@myclass.acceptObjs("A String", %w{a long array def for things}, true)).to eq("Got 'A String'")
 		# TODO: arrays, etc?
 	end
@@ -102,4 +103,5 @@ RSpec.describe "HashLink" do
 	end
 	# TODO: field write
 	# TODO: to_s integration?
+	# TODO: check GC integration
 end

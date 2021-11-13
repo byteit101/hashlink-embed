@@ -127,17 +127,9 @@ module HashLink
 				a = Hl.exception_stack
 				hlstr = Hl.to_string(ret).read_wstring
 				ex = ::HashLink::Exception.new("Uncaught HashLink exception: #{hlstr}")
-			# 	uprintf(USTR("Uncaught exception: %s\n"), hl_to_string(ctx.ret));
-			require 'pry'
-			binding.pry
-			puts "attempting backtrace"
-				p Hl::Varray.new(a).asize
 				ex.set_backtrace(Hl::Varray.new(a).asize.times.map do |i|
-					puts "check bt-------------- size=#{Hl::Varray.new(a).asize}x"
+					_read_array(a, i).read_wstring
 				end)
-			# 	for(i=0;i<a->size;i++)
-			#((t*)  (((varray*)(a))+1)  )
-			# 		uprintf(USTR("Called from %s\n"), hl_aptr(a,uchar*)[i]);
 				raise ex
 			end
 			return ret
@@ -448,7 +440,7 @@ module HashLink
 			# TODO: check for failures, npe's, etc
 			c.value = obj
 			@engine.call_ruby(c, args)
-			DynRef.new(Hl::Vdynamic.new(obj), @engine)
+			DynRef.new(Hl::Vdynamic.new(obj), @engine, pin: true)
 		end
 
 # 		def get_field(name, err=true)
@@ -462,7 +454,7 @@ module HashLink
 		end
 		def methods
 			# TODO: move?
-			::HashLink::ArrayRef.new(::Hl.obj_fields(static_instance), @engine).to_a
+			::HashLink::ArrayRef.new(::Hl.obj_fields(static_instance), @engine, pin: false).to_a
 		end
 
 		def _get_field(name)
@@ -488,7 +480,7 @@ module HashLink
 		def initialize(ptr, gc, pin:)
 			@ptr = ptr
 			::Kernel.puts "not pinned! #{self.inspect}" unless pin
-			@pin = gc.pin(ptr.to_ptr, self.inspect) if pin
+			@pin = gc.pin(ptr.to_ptr) if pin
 		end
 		def __ptr
 			@ptr
@@ -526,7 +518,7 @@ module HashLink
 
 		def methods
 			# TODO: move?
-			::HashLink::ArrayRef.new(::Hl.obj_fields(@ptr), @engine).to_a
+			::HashLink::ArrayRef.new(::Hl.obj_fields(@ptr), @engine, pin: false).to_a
 		end
 
 		# TODO: actively define these
