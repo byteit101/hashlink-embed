@@ -177,7 +177,7 @@ class Code < FFI::Struct
   end
 
   extend FFI::Library
-  ffi_lib 'hlhl'
+  ffi_lib 'hl'
 
   attach_variable :tvoid, :hlt_void, Type
   attach_variable :i32, :hlt_i32, Type
@@ -194,16 +194,9 @@ class Code < FFI::Struct
   attach_function :global_init, :hl_global_init, [ ], :void
   attach_function :global_free, :hl_global_free, [ ], :void
   attach_function :sys_init, :hl_sys_init, [ :pointer, :int, :pointer ], :void
-  attach_function :code_read, :hl_code_read, [ :pointer, :int, :buffer_out ], :pointer
-  attach_function :code_free, :hl_code_free, [ :pointer ], :void
-  attach_function :module_alloc, :hl_module_alloc, [ :pointer], :pointer
-  attach_function :module_free, :hl_module_free, [ :pointer], :void
-  attach_function :module_init, :hl_module_init, [ :pointer, :bool], :int
   attach_function :free, :hl_free, [ :pointer], :void
   attach_function :register_thread, :hl_register_thread, [:pointer], :void
   attach_function :unregister_thread, :hl_unregister_thread, [], :void
-  attach_function :profile_setup, :hl_profile_setup, [:int], :void
-  attach_function :profile_end, :hl_profile_end, [], :void
   attach_function :dyn_call_safe, :hl_dyn_call_safe, [:pointer, :pointer, :int, :buffer_out], :pointer
 
   attach_function :dyn_getp, :hl_dyn_getp, [:pointer, :int, :pointer], :pointer
@@ -219,7 +212,7 @@ class Code < FFI::Struct
 
   attach_function :alloc_obj, :hl_alloc_obj, [:pointer], :pointer
   #attach_function :alloc_obj, :hl_alloc_obj, [:pointer], :int
-  attach_function :obj_resolve_field, [:pointer, :int], :pointer
+  attach_function :obj_resolve_field, :hl_obj_resolve_field, [:pointer, :int], :pointer
   attach_function :obj_fields, :hl_obj_fields, [:pointer], :pointer
   attach_function :obj_lookup, :hl_obj_lookup, [:pointer, :int, :buffer_out], :pointer
   attach_function :lookup_find, :hl_lookup_find, [:pointer, :int, :int], :pointer
@@ -227,11 +220,11 @@ class Code < FFI::Struct
   attach_function :write_dyn, :hl_write_dyn, [:pointer, :pointer, :pointer, :bool], :void
   attach_function :dyn_casti, :hl_dyn_casti, [:pointer, :pointer, :pointer], :int
 
-  attach_function :add_root, :hl_add_rootrb, [:pointer], :void
-  attach_function :remove_root, :hl_remove_rootrb, [:pointer], :void
+  attach_function :add_root, :hl_add_root, [:pointer], :void
+  attach_function :remove_root, :hl_remove_root, [:pointer], :void
 
-  attach_function :get_stack_ptr, [:pointer], :void
   attach_function :get_thread, :hl_get_thread, [], :pointer
+  attach_function :enter_thread_stack, :hl_enter_thread_stack, [:int], :void
 
   attach_function :exception_stack, :hl_exception_stack, [ ], :pointer
 
@@ -273,5 +266,27 @@ class Code < FFI::Struct
   HNULL	= 19;
   HMETHOD = 20;
   HSTRUCT	= 21;
+
+  module EmbedJit
+
+	extend FFI::Library
+	ffi_lib 'hl-jit'
+
+	attach_function :code_read, :hl_code_read, [ :pointer, :int, :buffer_out ], :pointer
+	attach_function :code_free, :hl_code_free, [ :pointer ], :void
+	attach_function :module_alloc, :hl_module_alloc, [ :pointer], :pointer
+	attach_function :module_free, :hl_module_free, [ :pointer], :void
+	attach_function :module_init, :hl_module_init, [ :pointer, :bool], :int
+	attach_function :profile_setup, :hl_profile_setup, [:int], :void
+	attach_function :profile_end, :hl_profile_end, [], :void
+
+	#attach_function :get_stack_ptr, [:pointer], :void
+  end
+
+  %i[code_read code_free module_alloc module_free module_init profile_setup profile_end get_stack_ptr].each {|ejm|
+	define_singleton_method(ejm) { |*args|
+		EmbedJit.send(ejm, *args)
+	}
+}
 
 end

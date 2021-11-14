@@ -40,11 +40,8 @@ module HashLink
 		def initialize(bytecode)
 			Hl.global_init
 			Hl.sys_init(nil, 0, nil) # TODO: args?  #hl_sys_init((void**)argv,argc,file);
-			# the GC stops at the stack pointer. Don't scan any ruby code?
-			@stack_pointer = FFI::MemoryPointer.new(:pointer, 1)
-			Hl.get_stack_ptr(@stack_pointer) # "avoid" this frame?
-			# avoid the ruby&ffi stack?
-			Hl.register_thread(@stack_pointer.read_pointer()) # We must keep this updated
+			# the GC stops at the stack pointer. Don't scan any ruby code
+			Hl.register_thread(nil)
 			
 			# ptr is an out-string if there was an eeror
 			ptr = FFI::MemoryPointer.new(:pointer, 1)
@@ -108,10 +105,8 @@ module HashLink
 
 		def call_raw(closure, args)
 			Hl.profile_setup(-1) # TODO: profile setup?
-			# TODO: avoid perf penalty of constant updates?
-			cthread = Hl::ThreadInfo.new(Hl.get_thread)
-			Hl.get_stack_ptr(@stack_pointer) # avoid the ruby&ffi stack
-			cthread.stack_top = @stack_pointer.read_pointer() # We must keep this updated for each call
+			# avoid the ruby&ffi stack, we must keep this updated for each call
+			Hl::enter_thread_stack(0)
 
 			ret = if args == []
 				Hl.dyn_call_safe(closure,nil,0,@isExc)
