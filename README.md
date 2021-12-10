@@ -1,6 +1,6 @@
-# HashLink (Embed)
+# HashLink (Embed into Ruby)
 
-This gem provides a method to embed and call into Haxe code via HashLink. Currently, most primitive types are supported, along with strings, references to objects, and closures/functions. See the table below for all features supported so far.
+This gem provides a method to embed and call into Haxe code via HashLink from Ruby. Currently, most primitive types are supported, along with strings, references to objects, and closures/functions. See the table below for all features supported so far.
 
 Providing Ruby objects to Haxe code is currently not supported, though Ruby code can hold references to Haxe objects.
 
