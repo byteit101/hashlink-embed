@@ -280,7 +280,7 @@ class Code < FFI::Struct
 	attach_function :profile_setup, :hl_profile_setup, [:int], :void
 	attach_function :profile_end, :hl_profile_end, [], :void
 
-	#attach_function :get_stack_ptr, [:pointer], :void
+	#attach_function :get_stack_ptr, [:pointer], :void void get_stack_ptr(void** a) {	*a = (void*)&a;}
   end
 
   %i[code_read code_free module_alloc module_free module_init profile_setup profile_end get_stack_ptr].each {|ejm|

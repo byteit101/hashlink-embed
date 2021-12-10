@@ -13,7 +13,16 @@ module HashLink
 		return ret
 	end
 
+	# Something went wrong calling into Haxe Code
 	class Exception <  RuntimeError
+	end
+
+	# Something went wrong starting up Hashlink
+	class EmbeddingError <  RuntimeError
+	end
+	
+	# "nil" isn't a thing on HL/haxe
+	class NullAccessError <  RuntimeError
 	end
 	# enable package dot access, with cache
 	class Package < BasicObject
@@ -24,7 +33,7 @@ module HashLink
 		end
 		
 		def method_missing(name, *args)
-			::Kernel.raise "Args must be empty when navigating HashLink packages" unless args.empty?
+			::Kernel.raise ArgumentError, "Args must be empty when navigating HashLink packages" unless args.empty?
 			cached = @cache[name]
 			return cached if cached
 			sname = name.to_s
@@ -48,19 +57,21 @@ module HashLink
 			@code = Hl::Code.new(Hl.code_read(bytecode, bytecode.length, ptr))
 			strPtr = ptr.read_pointer()
 			err = strPtr.null? ? nil : strPtr.read_string()
-			raise err if err
+			raise EmbeddingError, err if err
 			
 			# now load a new module based on this code
 			m = Hl.module_alloc(@code)
-			raise "error 2" if m.nil?
+			raise EmbeddingError, "Unable to allocate HashLink Module" if m.nil?
 
-			raise "no init 3" if Hl.module_init(m,false) == 0
+			raise EmbeddingError, "Unable to initialize HashLink Module" if Hl.module_init(m,false) == 0
 			@m = Hl::Module.new(m)
 			Hl.code_free(@code) #module "owns" the code
 
 			@isExc = FFI::MemoryPointer.new(:int, 1)
 			@gc = GcInterop.new(self) # TODO: pin all arguments too!
 
+			# call the entrypoint to initialize all the types
+			# lots of types are broken until after this call
 			entrypoint()
 			@iclasses = @code.ntypes.times.map do |i|
 				ht = Hl::Type.index_at(@code.types,i)
@@ -74,11 +85,12 @@ module HashLink
 			end.reject(&:nil?).to_h
 			@pkgroot = Package.new(self, [])
 			@stringClz = types.String
-			raise "no string" unless @stringClz
+			raise EmbeddingError, "Haxe String class required, no wrapper found" unless @stringClz
 			@stringType = @iclasses["String"]
-			raise "no string type" unless @stringType
+			raise EmbeddingError, "Haxe String class required, no pointer found" unless @stringType
 			@stringAlloc = @stringClz._get_field("__alloc__")
-			raise "no string alloc" unless @stringAlloc
+			raise EmbeddingError, "Haxe String allocator required, none found" unless @stringAlloc
+
 			# save caches
 			@dtrue = Hl.alloc_dynbool(true) # note: not true alloc, no gc
 			@dfalse = Hl.alloc_dynbool(false)
@@ -98,7 +110,7 @@ module HashLink
 		def dispose
 			Hl.module_free(@m)
 			alloc_field = FFI::Pointer.new(:pointer, @code.pointer.address + @code.offset_of(:alloc))
-			Hl.free alloc_field #(@code.alloc)
+			Hl.free alloc_field
 			Hl.unregister_thread
 			Hl.global_free
 		end
@@ -106,12 +118,13 @@ module HashLink
 		def call_raw(closure, args)
 			Hl.profile_setup(-1) # TODO: profile setup?
 			# avoid the ruby&ffi stack, we must keep this updated for each call
-			Hl::enter_thread_stack(0)
+			Hl.enter_thread_stack(0)
 
 			ret = if args == []
 				Hl.dyn_call_safe(closure,nil,0,@isExc)
 			else
 				# TODO: HL_MAX_ARGS!
+				raise EmbeddingError, "HL_MAX_ARGS is 10, #{args.length} provided" if args.length > 10
 				HashLink.memory_pointer(:pointer, 10) do |cargs|
 					cargs.write_array_of_pointer(args)
 					Hl.dyn_call_safe(closure,cargs,args.length,@isExc)
@@ -143,9 +156,9 @@ module HashLink
 
 		def call_ruby(closure, args)
 			# TODO: check types?
-			raise "nil or null" if closure.nil? or closure.null?
+			raise NullAccessError, "nil or null closure provided" if closure.nil? or closure.null?
 			type = Hl::TypeFun.new(Hl::Type.new(closure.t).details)
-			raise "arity error, #{type.nargs} vs #{args.length}" if type.nargs != args.length
+			raise ArgumentError, "arity error, #{type.nargs} vs #{args.length}" if type.nargs != args.length
 			ptrs = type.args.read_array_of_pointer(args.length).map{|p| Hl::Type.new(p)}
 
 			converted = args.zip(ptrs).map.each_with_index do |(arg, atype), i|
@@ -187,6 +200,7 @@ module HashLink
 			case type.kind
 			when Hl::HNULL,Hl::HVOID then nil
 			when Hl::HI32 then ptr.read_int
+			when Hl::HF32 then ptr.read_float
 			when Hl::HF64 then ptr.read_double
 			when Hl::HBOOL then ptr.read_int8 != 0
 			when Hl::HBYTES then ptr.read_pointer.read_wstring
@@ -206,7 +220,7 @@ module HashLink
 			when Hl::HDYN
 				# TODO: read_pointer
 				unwrap(ptr.read_pointer, type, pin: pin) # TODO: type, or pointer type?
-			else raise "unknown type to read #{type.kind}"
+			else raise NotImplementedError, "unknown type to read #{type.kind}"
 			end
 		end
 
@@ -216,6 +230,7 @@ module HashLink
 			case type.kind
 			when Hl::HNULL,Hl::HVOID then nil
 			when Hl::HI32 then ptr.read_int
+			when Hl::HF32 then ptr.read_float
 			when Hl::HF64 then ptr.read_double
 			when Hl::HBOOL then ptr.read_int8 != 0
 			when Hl::HBYTES then ptr.read_wstring
@@ -235,7 +250,7 @@ module HashLink
 			when Hl::HDYN
 				# TODO: read_pointer
 				unwrap(ptr, type, pin: pin) # TODO: type, or pointer type?
-			else raise "unknown type to read array #{type.kind}"
+			else raise NotImplementedError, "unknown type to read array #{type.kind}"
 			end
 		end
 
@@ -248,6 +263,7 @@ module HashLink
 			when Hl::HF32 then dd.v.f
 			when Hl::HF64 then dd.v.d
 			when Hl::HBOOL then dd.v.b
+				# TODO: bytes?
 			when Hl::HOBJ
 				if obj_is_str(type)
 					# TODO: more efficient retreival?
@@ -273,9 +289,9 @@ module HashLink
 				if dt.kind != Hl::HDYN
 					unwrap(dyn, dt, pin: pin)
 				else
-					raise "double dyn!"
+					raise NotImplementedError, "double dyn!"
 				end
-			else raise "unknown type to unwrap #{type.kind}"
+			else raise NotImplementedError, "unknown type to unwrap #{type.kind}"
 			end
 			
 		end
@@ -305,13 +321,13 @@ module HashLink
 					if ruby.is_a? String
 						alloc_str(ruby)
 					else
-						raise "Expecting: string, got #{ruby.class.name}"
+						raise ArgumentError,"Expecting: string, got #{ruby.class.name}"
 					end
 				else
-					raise "unknown object type to wrap"
+					raise NotImplementedError, "unknown object type to wrap"
 				end
 			when Hl::HDYN then make_dyn(ruby)
-			else raise "unknown type to wrap #{type.kind}"
+			else raise NotImplementedError, "unknown type to wrap #{type.kind}"
 			end
 		end
 		
@@ -326,7 +342,7 @@ module HashLink
 			when Integer then make_int32(ruby)
 			when Float then make_double(ruby)
 			else
-				raise "unsupported type for auto-wrapping #{ruby.class}"
+				raise NotImplementedError, "unsupported type for auto-wrapping #{ruby.class}"
 			end
 		end
 
@@ -343,7 +359,7 @@ module HashLink
 		# elements must respond to .t and be raw objs/pointers
 		def alloc_rawarray(elements=[], type:nil)
 			if elements.empty?
-				raise "must provide type on empty array creation!" if type.nil?
+				raise ArgumentError, "must provide type on empty array creation!" if type.nil?
 			elsif type.nil?
 				type = elements.first.t
 			end
@@ -363,7 +379,8 @@ module HashLink
 					tv = Hl::TypeVirtual.new(type.details)
 					# TODO: validate nfields is the correct name
 					Hl.lookup_find(tv.lookup, tv.nfields, hash)
-				else "Can't look up type on unknown thing: #{type.kind}"
+				else 
+					raise NotImplementedError,  "Can't look up type on unknown thing: #{type.kind}"
 			end
 			if lookup.null?
 				if err
@@ -374,7 +391,7 @@ module HashLink
 			end
 			fl = Hl::FieldLookup.new(lookup)
 			if fl.hashed_name != hash
-				raise "Implementation error on finding #{name}"
+				raise EmbeddingError, "Implementation error on finding #{name}"
 			end
 			
 			return Hl.dyn_getp(instance, fl.hashed_name, Hl.dyn)

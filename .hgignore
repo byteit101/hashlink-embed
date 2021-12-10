@@ -4,3 +4,4 @@ hashlink-1*/
 *.hl
 temp/*
 pkg/*
+hl-src/
