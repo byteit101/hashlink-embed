@@ -1,8 +1,8 @@
 # HashLink (Embed)
 
-This gem provides a method to embed and call into Haxe code via HashLink. Currently, most primitive types are supported, along with strings, references to objects, and closures/functions.
+This gem provides a method to embed and call into Haxe code via HashLink. Currently, most primitive types are supported, along with strings, references to objects, and closures/functions. See the table below for all features supported so far.
 
-Providing ruby objects to haxe code is currently not supported.
+Providing Ruby objects to Haxe code is currently not supported, though Ruby code can hold references to Haxe objects.
 
 This is currently a work in progress; if you encounter a bug, please file an issue.
 
@@ -119,7 +119,10 @@ In order to support Haxe-Ruby interop, the following Haxe classes must be presen
 
 Additionally, for iterating and converting List & Map Haxe instances into Ruby instances, the Haxe standard library iteration functions must be present in the compiled HashLink VM code. If you encounter issues with `#to_a` or `#to_h`, consider adding iteration to your Haxe code, or adding the compilation flag `-dce no` to disable stdlib dead code elimination when compiling the .hl file.
 
+## License
+
+LGPL v3.0 (or later)
+
 ## Contributing
 
 Bug reports and pull requests are welcome on GitHub at https://github.com/byteit101/hashlink-embed.
-
