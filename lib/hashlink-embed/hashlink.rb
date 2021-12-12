@@ -137,7 +137,7 @@ module HashLink
 				ex = ::HashLink::Exception.new("Uncaught HashLink exception: #{hlstr}")
 				ex.set_backtrace(Hl::Varray.new(a).asize.times.map do |i|
 					_read_array(a, i).read_wstring
-				end)
+				end + caller)
 				raise ex
 			end
 			return ret
